@@ -642,7 +642,6 @@ arrangelayers(Monitor *m)
 					l->layer_surface->current.keyboard_interactive != ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE ||
 					!l->mapped)
 				continue;
-			/* Deactivate the focused client. */
 			focusclient(NULL, l, 0);
 			return;
 		}

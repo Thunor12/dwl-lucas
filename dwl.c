@@ -1517,7 +1517,7 @@ dirtomon(enum wlr_direction dir)
 void
 focusclient(Client *c, LayerSurface *l, int lift)
 {
-	struct wlr_surface *old = seat->keyboard_state.focused_surface;
+	struct wlr_surface *surface, *old = seat->keyboard_state.focused_surface;
 	int unused_lx, unused_ly, old_client_type;
 	Client *old_c = NULL;
 	LayerSurface *old_l = NULL;
@@ -1573,30 +1573,22 @@ focusclient(Client *c, LayerSurface *l, int lift)
 	}
 	printstatus();
 
-	if (l) {
-		/* Focus a layer surface and let the input method follow it */
-		input_method_relay_set_focus(input_method_relay, l->layer_surface->surface);
-		client_notify_enter(l->layer_surface->surface, wlr_seat_get_keyboard(seat));
-		return;
-	}
-
-	if (!c) {
+	if (!c && !l) {
 		/* With no client, all we have left is to clear focus */
 		input_method_relay_set_focus(input_method_relay, NULL);
 		wlr_seat_keyboard_notify_clear_focus(seat);
 		return;
 	}
 
-	/* Change cursor surface */
+	surface = c ? client_surface(c) : l->layer_surface->surface;
+	input_method_relay_set_focus(input_method_relay, surface);
+	client_notify_enter(surface, wlr_seat_get_keyboard(seat));
+
+	if (l)
+		return;
+
+	client_activate_surface(surface, 1);
 	motionnotify(0, NULL, 0, 0, 0, 0);
-
-	input_method_relay_set_focus(input_method_relay, client_surface(c));
-
-	/* Have a client, so focus its top-level wlr_surface */
-	client_notify_enter(client_surface(c), wlr_seat_get_keyboard(seat));
-
-	/* Activate the new client */
-	client_activate_surface(client_surface(c), 1);
 
 	if (!client_is_unmanaged(c))
 		focused_client = c;

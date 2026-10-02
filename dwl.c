@@ -218,6 +218,11 @@ struct Monitor {
 	struct wlr_box w; /* window area, layout-relative */
 	struct wl_list layers[4]; /* LayerSurface.link */
 	const Layout *lt[2];
+	int enablegaps;
+	int gappih; /* horizontal gap between windows */
+	int gappiv; /* vertical gap between windows */
+	int gappoh; /* horizontal outer gaps */
+	int gappov; /* vertical outer gaps */
 	unsigned int seltags;
 	unsigned int sellt;
 	uint32_t tagset[2];
@@ -264,6 +269,7 @@ typedef struct {
 static void applybounds(Client *c, struct wlr_box *bbox);
 static void applyrules(Client *c);
 static void arrange(Monitor *m);
+static void arrangegaps(Monitor *m);
 static void arrangelayer(Monitor *m, struct wl_list *list,
 		struct wlr_box *usable_area, int exclusive);
 static void arrangelayers(Monitor *m);
@@ -313,6 +319,7 @@ static void fullscreennotify(struct wl_listener *listener, void *data);
 static void gpureset(struct wl_listener *listener, void *data);
 static void handlesig(int signo);
 static void incnmaster(const Arg *arg);
+static void preparegaps(Monitor *m);
 static void inputdevice(struct wl_listener *listener, void *data);
 static const Key *keybinding(uint32_t mods, xkb_keysym_t sym);
 static void keypress(struct wl_listener *listener, void *data);
@@ -359,6 +366,7 @@ static void tagmon(const Arg *arg);
 static void tile(Monitor *m);
 static void togglefloating(const Arg *arg);
 static void togglefullscreen(const Arg *arg);
+static void togglegaps(const Arg *arg);
 static void toggletag(const Arg *arg);
 static void toggleview(const Arg *arg);
 static void unlocksession(struct wl_listener *listener, void *data);
@@ -431,6 +439,7 @@ static struct wlr_box sgeom;
 static struct wl_list mons;
 static Monitor *selmon;
 static int consumed[KEY_MAX + 1];
+static int resizelock = 0; /* store geometry during arrange, apply gaps after */
 
 /* global event handlers */
 static struct wl_listener cursor_axis = {.notify = axisnotify};
@@ -582,10 +591,50 @@ arrange(Monitor *m)
 								: c->scene->node.parent);
 	}
 
-	if (m->lt[m->sellt]->arrange)
+	if (m->lt[m->sellt]->arrange) {
+		preparegaps(m);
 		m->lt[m->sellt]->arrange(m);
+		arrangegaps(m);
+	}
 	motionnotify(0, NULL, 0, 0, 0, 0);
 	checkidleinhibitor(NULL);
+}
+
+void
+arrangegaps(Monitor *m)
+{
+	Client *c;
+	int n, gaps;
+
+	if (!m->enablegaps)
+		return;
+
+	resizelock = 0;
+
+	n = 0;
+	wl_list_for_each(c, &clients, link) {
+		if (!VISIBLEON(c, m) || c->isfloating || c->isfullscreen)
+			continue;
+		n++;
+	}
+
+	gaps = !(smartgaps && n == 1) &&
+		(monoclegaps || m->lt[m->sellt]->arrange != monocle);
+	if (gaps) {
+		m->w.width += m->gappih + 2 * m->gappoh;
+		m->w.height += m->gappiv + 2 * m->gappov;
+	}
+	wl_list_for_each(c, &clients, link) {
+		if (!VISIBLEON(c, m) || c->isfloating || c->isfullscreen)
+			continue;
+		if (gaps) {
+			c->geom.x += m->gappih + m->gappoh;
+			c->geom.y += m->gappiv + m->gappov;
+			c->geom.width -= m->gappih;
+			c->geom.height -= m->gappiv;
+		}
+		resize(c, c->geom, 0);
+	}
 }
 
 void
@@ -1161,6 +1210,12 @@ createmon(struct wl_listener *listener, void *data)
 
 	for (i = 0; i < LENGTH(m->layers); i++)
 		wl_list_init(&m->layers[i]);
+
+	m->enablegaps = enablegaps;
+	m->gappih = gappih;
+	m->gappiv = gappiv;
+	m->gappoh = gappoh;
+	m->gappov = gappov;
 
 	wlr_output_state_init(&state);
 	/* Initialize monitor state using configured rules */
@@ -2272,6 +2327,31 @@ pointerfocus(Client *c, LayerSurface *l, struct wlr_surface *surface, double sx,
 }
 
 void
+preparegaps(Monitor *m)
+{
+	Client *c;
+	int n;
+
+	if (!m->enablegaps)
+		return;
+
+	n = 0;
+	wl_list_for_each(c, &clients, link) {
+		if (!VISIBLEON(c, m) || c->isfloating || c->isfullscreen)
+			continue;
+		n++;
+	}
+
+	resizelock = 1;
+
+	if ((smartgaps && n == 1) || (!monoclegaps && m->lt[m->sellt]->arrange == monocle))
+		return;
+
+	m->w.width -= m->gappih + 2 * m->gappoh;
+	m->w.height -= m->gappiv + 2 * m->gappov;
+}
+
+void
 printstatus(void)
 {
 	Monitor *m = NULL;
@@ -2384,6 +2464,11 @@ resize(Client *c, struct wlr_box geo, int interact)
 {
 	struct wlr_box *bbox;
 	struct wlr_box clip;
+
+	if (resizelock) {
+		c->geom = geo;
+		return;
+	}
 
 	if (!c->mon || !client_surface(c)->mapped)
 		return;
@@ -2946,6 +3031,15 @@ togglefullscreen(const Arg *arg)
 	Client *sel = focustop(selmon);
 	if (sel)
 		setfullscreen(sel, !sel->isfullscreen);
+}
+
+void
+togglegaps(const Arg *arg)
+{
+	if (!selmon)
+		return;
+	selmon->enablegaps = !selmon->enablegaps;
+	arrange(selmon);
 }
 
 void

@@ -51,7 +51,8 @@
 #include <wlr/types/wlr_primary_selection.h>
 #include <wlr/types/wlr_primary_selection_v1.h>
 #include <wlr/types/wlr_relative_pointer_v1.h>
-#include <wlr/types/wlr_scene.h>
+#include <scenefx/render/fx_renderer/fx_renderer.h>
+#include <scenefx/types/wlr_scene.h>
 #include <wlr/types/wlr_screencopy_v1.h>
 #include <wlr/types/wlr_seat.h>
 #include <wlr/types/wlr_server_decoration.h>
@@ -122,6 +123,7 @@ typedef struct {
 	Monitor *mon;
 	struct wlr_scene_tree *scene;
 	struct wlr_scene_rect *border[4]; /* top, bottom, left, right */
+	struct wlr_scene_rect *round_border; /* full window, used when corners are rounded */
 	struct wlr_scene_tree *scene_surface;
 	struct wl_list link;
 	struct wl_list flink;
@@ -367,6 +369,7 @@ static void requestdecorationmode(struct wl_listener *listener, void *data);
 static void requeststartdrag(struct wl_listener *listener, void *data);
 static void requestmonstate(struct wl_listener *listener, void *data);
 static void resize(Client *c, struct wlr_box geo, int interact);
+static void roundtoplevel(struct wlr_scene_buffer *buffer, int sx, int sy, void *data);
 static void run(char *startup_cmd);
 static void setcursor(struct wl_listener *listener, void *data);
 static void setcursorshape(struct wl_listener *listener, void *data);
@@ -1959,7 +1962,7 @@ gpureset(struct wl_listener *listener, void *data)
 	struct wlr_renderer *old_drw = drw;
 	struct wlr_allocator *old_alloc = alloc;
 	struct Monitor *m;
-	if (!(drw = wlr_renderer_autocreate(backend)))
+	if (!(drw = fx_renderer_create(backend)))
 		die("couldn't recreate renderer");
 
 	if (!(alloc = wlr_allocator_autocreate(backend, drw)))
@@ -2212,6 +2215,13 @@ mapnotify(struct wl_listener *listener, void *data)
 		c->border[i] = wlr_scene_rect_create(c->scene, 0, 0,
 				c->isurgent ? urgentcolor : bordercolor);
 		c->border[i]->node.data = c;
+	}
+	if (cornerradius > 0) {
+		c->round_border = wlr_scene_rect_create(c->scene, 0, 0,
+				c->isurgent ? urgentcolor : bordercolor);
+		c->round_border->node.data = c;
+		c->round_border->accepts_input = true;
+		wlr_scene_node_lower_to_bottom(&c->round_border->node);
 	}
 
 	/* Initialize client geometry with room for border */
@@ -2675,11 +2685,36 @@ requestmonstate(struct wl_listener *listener, void *data)
 	updatemons(NULL, NULL);
 }
 
+static void
+roundtoplevel(struct wlr_scene_buffer *buffer, int sx, int sy, void *data)
+{
+	Client *c = data;
+	struct wlr_scene_surface *scene_surface;
+	struct wlr_xdg_surface *xdg_surface;
+	int radius = 0;
+
+	if (!c->isfullscreen && cornerradius > 0)
+		radius = cornerradius;
+
+	scene_surface = wlr_scene_surface_try_from_buffer(buffer);
+	if (!scene_surface)
+		return;
+
+	xdg_surface = wlr_xdg_surface_try_from_wlr_surface(scene_surface->surface);
+	if (!xdg_surface || xdg_surface->role != WLR_XDG_SURFACE_ROLE_TOPLEVEL)
+		return;
+	if (wlr_subsurface_try_from_wlr_surface(scene_surface->surface))
+		return;
+
+	wlr_scene_buffer_set_corner_radius(buffer, radius);
+}
+
 void
 resize(Client *c, struct wlr_box geo, int interact)
 {
 	struct wlr_box *bbox;
 	struct wlr_box clip;
+	int i;
 
 	if (resizelock) {
 		c->geom = geo;
@@ -2698,13 +2733,30 @@ resize(Client *c, struct wlr_box geo, int interact)
 	/* Update scene-graph, including borders */
 	wlr_scene_node_set_position(&c->scene->node, c->geom.x, c->geom.y);
 	wlr_scene_node_set_position(&c->scene_surface->node, c->bw, c->bw);
-	wlr_scene_rect_set_size(c->border[0], c->geom.width, c->bw);
-	wlr_scene_rect_set_size(c->border[1], c->geom.width, c->bw);
-	wlr_scene_rect_set_size(c->border[2], c->bw, c->geom.height - 2 * c->bw);
-	wlr_scene_rect_set_size(c->border[3], c->bw, c->geom.height - 2 * c->bw);
-	wlr_scene_node_set_position(&c->border[1]->node, 0, c->geom.height - c->bw);
-	wlr_scene_node_set_position(&c->border[2]->node, 0, c->bw);
-	wlr_scene_node_set_position(&c->border[3]->node, c->geom.width - c->bw, c->bw);
+	if (c->round_border && cornerradius > 0 && !c->isfullscreen) {
+		/* One rounded rect behind the window. The square edge borders
+		 * would stick out past the curve, so they stay hidden. */
+		wlr_scene_node_set_enabled(&c->round_border->node, 1);
+		wlr_scene_node_set_position(&c->round_border->node, 0, 0);
+		wlr_scene_rect_set_size(c->round_border, c->geom.width, c->geom.height);
+		wlr_scene_rect_set_corner_radius(c->round_border,
+				cornerradius + (int)c->bw);
+		for (i = 0; i < 4; i++)
+			wlr_scene_node_set_enabled(&c->border[i]->node, 0);
+	} else {
+		if (c->round_border)
+			wlr_scene_node_set_enabled(&c->round_border->node, 0);
+		wlr_scene_rect_set_size(c->border[0], c->geom.width, c->bw);
+		wlr_scene_rect_set_size(c->border[1], c->geom.width, c->bw);
+		wlr_scene_rect_set_size(c->border[2], c->bw, c->geom.height - 2 * c->bw);
+		wlr_scene_rect_set_size(c->border[3], c->bw, c->geom.height - 2 * c->bw);
+		wlr_scene_node_set_position(&c->border[1]->node, 0, c->geom.height - c->bw);
+		wlr_scene_node_set_position(&c->border[2]->node, 0, c->bw);
+		wlr_scene_node_set_position(&c->border[3]->node, c->geom.width - c->bw, c->bw);
+		for (i = 0; i < 4; i++)
+			wlr_scene_node_set_enabled(&c->border[i]->node, 1);
+	}
+	wlr_scene_node_for_each_buffer(&c->scene_surface->node, roundtoplevel, c);
 
 	client_set_size(c, c->geom.width - 2 * c->bw, c->geom.height - 2 * c->bw);
 	client_get_clip(c, &clip);
@@ -2954,7 +3006,9 @@ setup(void)
 	 * can also specify a renderer using the WLR_RENDERER env var.
 	 * The renderer is responsible for defining the various pixel formats it
 	 * supports for shared memory, this configures that for clients. */
-	if (!(drw = wlr_renderer_autocreate(backend)))
+	/* SceneFX replaces the stock scene renderer so window corners can be rounded.
+	 * Blur and shadows stay off; nothing below enables them. */
+	if (!(drw = fx_renderer_create(backend)))
 		die("couldn't create renderer");
 	wl_signal_add(&drw->events.lost, &gpu_reset);
 

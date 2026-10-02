@@ -1,0 +1,11 @@
+#!/bin/sh
+# Session entry for dwl: bar, wallpaper, Variety.
+# From a text console there is no session bus yet, so start one.
+# GDM already provides a bus; wrapping it again would hide the login session.
+cd "$(dirname "$0")" || exit 1
+export XDG_CURRENT_DESKTOP=dwl
+export XDG_SESSION_TYPE=wayland
+if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
+	exec dbus-run-session ./dwl -s ./bar/dwl-waybar
+fi
+exec ./dwl -s ./bar/dwl-waybar

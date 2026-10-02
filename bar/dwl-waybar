@@ -1,5 +1,44 @@
 #!/bin/sh
-# Launch waybar against the dwl that started this script. dwl speaks
-# dwl-ipc-unstable-v2, which waybar's dwl modules read directly.
+# Started by dwl -s, after WAYLAND_DISPLAY exists.
+# Brings up the wallpaper daemon, Variety, and the bar.
 cd "$(dirname "$0")" || exit 1
-exec waybar -l error -c "$PWD/config.jsonc" -s "$PWD/style.css"
+export XDG_CURRENT_DESKTOP=dwl
+log="${XDG_RUNTIME_DIR:-/tmp}/dwl-session.log"
+
+# awww restores the last image on startup. Variety deletes old copies, and a
+# missing path makes the daemon abort before any wallpaper can be set.
+cache="${XDG_CACHE_HOME:-$HOME/.cache}/awww"
+if [ -d "$cache" ]; then
+	find "$cache" -type f | while read -r f; do
+		img=$(tr '\0' '\n' <"$f" | tail -n 1)
+		if [ -n "$img" ] && [ ! -f "$img" ]; then
+			rm -f "$f"
+		fi
+	done
+fi
+
+awww-daemon >>"$log" 2>&1 &
+i=0
+while [ "$i" -lt 50 ]; do
+	if awww query >/dev/null 2>&1; then
+		break
+	fi
+	i=$((i + 1))
+	sleep 0.1
+done
+
+# Show the last good Variety image immediately. Variety replaces it once it is up.
+last=$(ls -1t "$HOME/.config/variety/wallpaper"/wallpaper-*.jpg 2>/dev/null | head -n 1)
+if [ -n "$last" ]; then
+	awww img "$last" >>"$log" 2>&1 || true
+fi
+
+# The tray has to exist before Variety, or its icon never attaches.
+waybar -l error -c "$PWD/config.jsonc" -s "$PWD/style.css" &
+bar=$!
+
+# A separate profile so this does not steal the Variety already running in COSMIC.
+# The profile folder is a link to the real config, so image sources stay shared.
+variety --profile dwl >>"$log" 2>&1 &
+
+wait "$bar"

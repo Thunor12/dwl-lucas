@@ -4,7 +4,7 @@
     "height": 26,
     "modules-left": ["dwl/tags"],
     "modules-center": ["dwl/window"],
-    "modules-right": ["clock"],
+    "modules-right": ["tray", "clock"],
 
     "dwl/tags": {
         "num-tags": 9,
@@ -13,6 +13,11 @@
     "dwl/window": {
         "format": "{layout}  {title}",
         "max-length": 80
+    },
+    "tray": {
+        "icon-size": 16,
+        "spacing": 8,
+        "show-passive-items": true
     },
     "clock": {
         "format": "{:%H:%M}",

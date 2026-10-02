@@ -1,5 +1,6 @@
 [Desktop Entry]
 Name=dwl
 Comment=dwm for Wayland
-Exec=dwl
+Exec=/home/kucas/repo/dwl-lucas/start-dwl
 Type=Application
+DesktopNames=dwl

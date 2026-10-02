@@ -32,6 +32,7 @@ window#waybar {
 }
 
 #window,
-#clock {
+#clock,
+#tray {
 	padding: 0 10px;
 }

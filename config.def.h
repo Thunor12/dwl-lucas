@@ -49,6 +49,9 @@ static const MonitorRule monrules[] = {
 };
 
 /* keyboard */
+/* The bindings below name the French level-0 keysyms (the printed characters).
+ * dwl also tries the shifted level, so the names are for the reader, not
+ * because Shift is ignored. */
 static const struct xkb_rule_names xkb_rules = {
 	/* can specify fields: rules, model, layout, variant, options */
 	/* example:

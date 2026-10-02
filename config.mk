@@ -34,3 +34,7 @@ XLIBS =
 # To avoid warnings about them, we do not use -std=c99 and instead of using the
 # gmake default 'CC=c99', we use cc.
 CC = cc
+
+# This machine only. -march=native must not be copied to another CPU.
+CFLAGS = -O3 -march=native -flto
+LDFLAGS = -O3 -flto

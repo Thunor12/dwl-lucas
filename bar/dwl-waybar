@@ -1,0 +1,5 @@
+#!/bin/sh
+# Launch waybar against the dwl that started this script. dwl speaks
+# dwl-ipc-unstable-v2, which waybar's dwl modules read directly.
+cd "$(dirname "$0")" || exit 1
+exec waybar -l error -c "$PWD/config.jsonc" -s "$PWD/style.css"
